@@ -29,6 +29,12 @@ variable "private_subnet_cidrs" {
   default     = []
 }
 
+variable "private_subnet_other_cidrs" {
+  description = "A list of CIDR blocks to use for the private subnets."
+  type        = list(string)
+  default     = []
+}
+
 variable "create_nat_gateways" {
   description = "Optionally create NAT gateways (which cost $) to provide internet connectivity to the private subnets."
   type        = bool

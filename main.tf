@@ -190,14 +190,74 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private[count.index].id
 }
 
+
+resource "aws_route_table" "private_other" {
+  depends_on = [aws_vpc.main]
+  count      = length(var.private_subnet_other_cidrs)
+  vpc_id     = aws_vpc.main.id
+
+  tags = merge(
+    var.tags,
+    {
+      "Name" = "${var.name_prefix}-private-other-rt-${count.index + 1}"
+    },
+  )
+}
+
+resource "aws_route" "private_other" {
+  depends_on = [
+    aws_nat_gateway.private,
+    aws_route_table.private,
+  ]
+  count                  = local.nat_gateway_count > 0 ? length(var.private_subnet_cidrs) : 0
+  route_table_id         = aws_route_table.private_other[count.index].id
+  nat_gateway_id         = element(aws_nat_gateway.private[*].id, count.index)
+  destination_cidr_block = "0.0.0.0/0"
+}
+
+resource "aws_route" "ipv6-private_other" {
+  depends_on = [
+    aws_egress_only_internet_gateway.outbound,
+    aws_route_table.private,
+  ]
+  count                       = length(var.public_subnet_cidrs) > 0 ? length(var.private_subnet_cidrs) : 0
+  route_table_id              = aws_route_table.private_other[count.index].id
+  egress_only_gateway_id      = aws_egress_only_internet_gateway.outbound[0].id
+  destination_ipv6_cidr_block = "::/0"
+}
+
+resource "aws_subnet" "private_other" {
+  count                           = length(var.private_subnet_other_cidrs)
+  vpc_id                          = aws_vpc.main.id
+  cidr_block                      = var.private_subnet_other_cidrs[count.index]
+  ipv6_cidr_block                 = cidrsubnet(aws_vpc.main.ipv6_cidr_block, 8, count.index + length(var.private_subnet_cidrs))
+  availability_zone               = element(local.azs, count.index)
+  map_public_ip_on_launch         = false
+  assign_ipv6_address_on_creation = true
+
+  tags = merge(
+    var.tags,
+    {
+      "Name" = "${var.name_prefix}-private_other-subnet-${count.index + 1}"
+      "Tier" = "Private"
+    },
+  )
+}
+
+resource "aws_route_table_association" "private_other" {
+  count          = length(var.private_subnet_other_cidrs)
+  subnet_id      = aws_subnet.private_other[count.index].id
+  route_table_id = aws_route_table.private_other[count.index].id
+}
+
 resource "aws_vpc_endpoint" "s3" {
   service_name    = "com.amazonaws.${data.aws_region.current.name}.s3"
   vpc_id          = aws_vpc.main.id
-  route_table_ids = compact(concat(aws_route_table.private.*.id, aws_route_table.public.*.id))
+  route_table_ids = compact(concat(aws_route_table.private_other.*.id, aws_route_table.private.*.id, aws_route_table.public.*.id))
 }
 
 resource "aws_vpc_endpoint" "dynamodb" {
   service_name    = "com.amazonaws.${data.aws_region.current.name}.dynamodb"
   vpc_id          = aws_vpc.main.id
-  route_table_ids = compact(concat(aws_route_table.private.*.id, aws_route_table.public.*.id))
+  route_table_ids = compact(concat(aws_route_table.private_other.*.id, aws_route_table.private.*.id, aws_route_table.public.*.id))
 }
